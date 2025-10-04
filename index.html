@@ -1,644 +1,714 @@
-import React, { useState, useEffect, useRef } from 'react';
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>OCTO ALIEN - Retro Arcade Game</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            font-family: monospace;
+            overflow: hidden;
+            touch-action: none;
+        }
+        #gameContainer {
+            position: relative;
+        }
+        canvas {
+            border: 4px solid #0ff;
+            box-shadow: 0 0 20px rgba(0, 255, 255, 0.5);
+            display: block;
+        }
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+        .hidden { display: none; }
+        h1 {
+            font-size: 3rem;
+            margin-bottom: 2rem;
+            text-shadow: 0 0 20px currentColor;
+        }
+        button {
+            padding: 1rem 2rem;
+            font-size: 1.2rem;
+            font-family: monospace;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:hover { transform: scale(1.05); }
+        .menu-btn { background: #0ff; color: #000; }
+        .victory-btn { background: #0f0; color: #000; }
+        .gameover-btn { background: #f0f; color: #000; }
+        .controls {
+            margin-top: 2rem;
+            font-size: 0.9rem;
+            text-align: center;
+            color: #0ff;
+        }
+        .score { font-size: 1.5rem; margin: 1rem; }
+    </style>
+</head>
+<body>
+<div id="gameContainer">
+    <canvas id="gameCanvas" width="400" height="700"></canvas>
 
-const OctoAlien = () => {
-const canvasRef = useRef(null);
-const [gameState, setGameState] = useState('MENU');
-const gameRef = useRef(null);
-const audioCtxRef = useRef(null);
-
-useEffect(() => {
-audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)();
-gameRef.current = {
-octo: { x: 200, y: 40, w: 80, health: 100, phase: 1, dir: 1, bombT: 0 },
-player: { x: 200, y: 620, w: 30, health: 100, lives: 3, vx: 0, respawn: 0 },
-bricks: [], bombers: [], pBullets: [], eBullets: [], oBombs: [],
-charge: { state: 'IDLE', time: 0, x: 0, y: 0, cd: 0, zones: [] },
-score: 0, t: 0, brickT: 0, bomberT: 0, shootT: 0, particles: [], shake: 0,
-showCtrl: true, ctrlT: 0
-};
-}, []);
-
-const sound = (type) => {
-if (!audioCtxRef.current) return;
-const ctx = audioCtxRef.current;
-const now = ctx.currentTime;
-const osc = ctx.createOscillator();
-const gain = ctx.createGain();
-osc.connect(gain);
-gain.connect(ctx.destination);
-
-if (type === 'shoot') {
-osc.frequency.setValueAtTime(440, now);
-gain.gain.setValueAtTime(0.1, now);
-gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
-osc.start(now);
-osc.stop(now + 0.08);
-} else if (type === 'hit') {
-osc.frequency.setValueAtTime(330, now);
-osc.frequency.exponentialRampToValueAtTime(220, now + 0.1);
-gain.gain.setValueAtTime(0.15, now);
-gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
-osc.start(now);
-osc.stop(now + 0.1);
-} else if (type === 'damage') {
-osc.type = 'sawtooth';
-osc.frequency.setValueAtTime(440, now);
-osc.frequency.exponentialRampToValueAtTime(110, now + 0.2);
-gain.gain.setValueAtTime(0.2, now);
-gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-osc.start(now);
-osc.stop(now + 0.2);
-} else if (type === 'detonate') {
-osc.frequency.setValueAtTime(80, now);
-gain.gain.setValueAtTime(0.3, now);
-gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
-osc.start(now);
-osc.stop(now + 0.3);
-} else if (type === 'phase') {
-[220, 277, 330].forEach(f => {
-const o = ctx.createOscillator();
-const g = ctx.createGain();
-o.connect(g);
-g.connect(ctx.destination);
-o.frequency.setValueAtTime(f, now);
-g.gain.setValueAtTime(0.1, now);
-g.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
-o.start(now);
-o.stop(now + 0.4);
-});
-} else if (type === 'victory') {
-[220, 277, 330, 440, 550].forEach((f, i) => {
-const o = ctx.createOscillator();
-const g = ctx.createGain();
-o.connect(g);
-g.connect(ctx.destination);
-o.frequency.setValueAtTime(f, now + i * 0.1);
-g.gain.setValueAtTime(0.1, now + i * 0.1);
-g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.2);
-o.start(now + i * 0.1);
-o.stop(now + i * 0.1 + 0.2);
-});
-}
-};
-
-const startGame = () => {
-const g = gameRef.current;
-g.octo = { x: 200, y: 40, w: 80, health: 100, phase: 1, dir: 1, bombT: 0 };
-g.player = { x: 200, y: 620, w: 30, health: 100, lives: 3, vx: 0, respawn: 0 };
-g.bricks = [];
-g.bombers = [];
-g.pBullets = [];
-g.eBullets = [];
-g.oBombs = [];
-g.charge = { state: 'IDLE', time: 0, x: 0, y: 0, cd: 0, zones: [] };
-g.score = 0;
-g.t = 0;
-g.brickT = 0;
-g.bomberT = 0;
-g.shootT = 0;
-g.particles = [];
-g.shake = 0;
-g.showCtrl = true;
-g.ctrlT = 0;
-setGameState('PLAYING');
-};
-
-useEffect(() => {
-if (gameState !== 'PLAYING') return;
-const g = gameRef.current;
-const keys = {};
-let touchX = null;
-
-const kd = (e) => { keys[e.key] = true; if (e.key === ' ') e.preventDefault(); };
-const ku = (e) => keys[e.key] = false;
-
-const ts = (e) => {
-e.preventDefault();
-const canvas = canvasRef.current;
-const rect = canvas.getBoundingClientRect();
-const x = e.touches[0].clientX - rect.left;
-const y = e.touches[0].clientY - rect.top;
-if (x < 80 && y > 630) {
-if (g.charge.state === 'IDLE' && g.charge.cd <= 0) {
-g.charge.state = 'CHARGING';
-g.charge.time = 0;
-} else if (g.charge.state === 'LAUNCHED') {
-g.charge.state = 'DETONATING';
-}
-} else {
-touchX = x;
-}
-};
-
-const tm = (e) => {
-e.preventDefault();
-const canvas = canvasRef.current;
-const rect = canvas.getBoundingClientRect();
-const x = e.touches[0].clientX - rect.left;
-const y = e.touches[0].clientY - rect.top;
-if (y < 600) touchX = x;
-};
-
-const te = (e) => {
-e.preventDefault();
-touchX = null;
-if (g.charge.state === 'CHARGING') {
-g.charge.state = 'LAUNCHED';
-g.charge.x = g.player.x;
-g.charge.y = g.player.y;
-}
-};
-
-const input = setInterval(() => {
-if (g.player.respawn <= 0) {
-if (keys['ArrowLeft'] || keys['a']) g.player.vx = -5;
-else if (keys['ArrowRight'] || keys['d']) g.player.vx = 5;
-else if (touchX !== null) {
-const diff = touchX - g.player.x;
-g.player.vx = Math.sign(diff) * Math.min(Math.abs(diff) * 0.2, 5);
-} else g.player.vx *= 0.8;
-
-if (keys[' ']) {
-if (g.charge.state === 'IDLE' && g.charge.cd <= 0) {
-g.charge.state = 'CHARGING';
-g.charge.time = 0;
-keys[' '] = false;
-} else if (g.charge.state === 'LAUNCHED') {
-g.charge.state = 'DETONATING';
-keys[' '] = false;
-}
-}
-}
-}, 16);
-
-window.addEventListener('keydown', kd);
-window.addEventListener('keyup', ku);
-window.addEventListener('touchstart', ts, { passive: false });
-window.addEventListener('touchmove', tm, { passive: false });
-window.addEventListener('touchend', te, { passive: false });
-
-return () => {
-clearInterval(input);
-window.removeEventListener('keydown', kd);
-window.removeEventListener('keyup', ku);
-window.removeEventListener('touchstart', ts);
-window.removeEventListener('touchmove', tm);
-window.removeEventListener('touchend', te);
-};
-}, [gameState]);
-
-useEffect(() => {
-if (gameState !== 'PLAYING') return;
-const canvas = canvasRef.current;
-const ctx = canvas.getContext('2d');
-const g = gameRef.current;
-
-const loop = setInterval(() => {
-const dt = 1/60;
-g.t += dt;
-
-if (g.showCtrl) {
-g.ctrlT += dt;
-if (g.ctrlT > 4) g.showCtrl = false;
-}
-
-if (g.shake > 0) g.shake *= 0.9;
-
-if (g.player.respawn > 0) {
-g.player.respawn -= dt;
-} else {
-g.player.x += g.player.vx;
-g.player.x = Math.max(15, Math.min(385, g.player.x));
-g.shootT += dt;
-if (g.shootT > 0.33) {
-g.shootT = 0;
-g.pBullets.push({ x: g.player.x, y: g.player.y - 15, vy: -8 });
-sound('shoot');
-}
-}
-
-if (g.octo.health <= 49 && g.octo.phase === 1) {
-g.octo.phase = 2;
-sound('phase');
-g.shake = 8;
-}
-
-if (g.octo.phase === 2) {
-g.octo.x += g.octo.dir * 2;
-if (g.octo.x < 50 || g.octo.x > 350) g.octo.dir *= -1;
-g.octo.bombT += dt;
-if (g.octo.bombT > 2.5) {
-g.octo.bombT = 0;
-g.oBombs.push({ x: g.octo.x, y: g.octo.y + 30, vy: 3, s: 12 });
-}
-}
-
-const spawnRate = g.octo.phase === 1 ? 1.2 : 0.65;
-g.brickT += dt;
-if (g.brickT > spawnRate && g.bricks.length < 60) {
-g.brickT = 0;
-const cols = 12;
-const bw = 320 / cols;
-for (let i = 0; i < 5; i++) {
-const c = Math.floor(Math.random() * cols);
-const r = Math.floor(Math.random() * 4);
-const x = 40 + c * bw + bw/2;
-const y = 100 + r * 25;
-let blocked = false;
-for (const z of g.charge.zones) {
-if (Math.hypot(x - z.x, y - z.y) < z.r) {
-blocked = true;
-break;
-}
-}
-const exists = g.bricks.some(b => Math.abs(b.x - x) < 5 && Math.abs(b.y - y) < 5);
-if (!exists && !blocked) {
-g.bricks.push({ x, y, w: bw - 4, h: 20, st: Math.random() * 1.5 });
-break;
-}
-}
-}
-
-g.bricks.forEach(b => {
-b.st += dt;
-if (b.st > 1.2) {
-b.st = 0;
-g.eBullets.push({ x: b.x, y: b.y + 10, vy: 4, t: 'brick' });
-}
-});
-
-const bomberRate = g.octo.phase === 1 ? 13 : 9;
-g.bomberT += dt;
-if (g.bomberT > bomberRate) {
-g.bomberT = 0;
-const left = Math.random() < 0.5;
-g.bombers.push({
-x: left ? -40 : 440,
-y: 280,
-vx: left ? 3 : -3,
-p: Math.random() * 6.28,
-bt: 0.5,
-hp: 3
-});
-}
-
-g.bombers.forEach(b => {
-b.x += b.vx;
-b.p += 0.05;
-b.y = 280 + Math.sin(b.p) * 30;
-b.bt += dt;
-if (b.bt > 1.5 && b.x > 20 && b.x < 380) {
-b.bt = 0;
-g.eBullets.push({ x: b.x, y: b.y + 15, vy: 3.5, t: 'bomber' });
-}
-});
-
-g.bombers = g.bombers.filter(b => b.x > -60 && b.x < 460 && b.hp > 0);
-g.pBullets.forEach(b => b.y += b.vy);
-g.eBullets.forEach(b => b.y += b.vy);
-g.oBombs.forEach(b => b.y += b.vy);
-g.pBullets = g.pBullets.filter(b => b.y > -10);
-g.eBullets = g.eBullets.filter(b => b.y < 710);
-g.oBombs = g.oBombs.filter(b => b.y < 710);
-
-if (g.charge.cd > 0) g.charge.cd -= dt;
-if (g.charge.state === 'CHARGING') {
-g.charge.time = Math.min(g.charge.time + dt, 2);
-} else if (g.charge.state === 'LAUNCHED') {
-g.charge.y -= 500 * dt;
-if (g.charge.y < -20) g.charge.state = 'DETONATING';
-} else if (g.charge.state === 'DETONATING') {
-const r = 60 + (g.charge.time / 2) * 140;
-g.charge.zones.push({ x: g.charge.x, y: g.charge.y, r, t: 4 });
-sound('detonate');
-g.shake = 6;
-g.charge.state = 'IDLE';
-g.charge.cd = 5;
-for (let i = 0; i < 20; i++) {
-const a = (6.28 * i) / 20;
-g.particles.push({
-x: g.charge.x, y: g.charge.y,
-vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
-life: 0.5, max: 0.5
-});
-}
-}
-
-g.charge.zones = g.charge.zones.filter(z => {
-z.t -= dt;
-return z.t > 0;
-});
-
-g.pBullets = g.pBullets.filter(b => {
-if (Math.abs(b.x - g.octo.x) < 40 && Math.abs(b.y - g.octo.y) < 25) {
-g.octo.health = Math.max(0, g.octo.health - 1);
-g.score += 5;
-sound('hit');
-g.shake = 2;
-return false;
-}
-for (let i = g.bricks.length - 1; i >= 0; i--) {
-const br = g.bricks[i];
-if (Math.abs(b.x - br.x) < br.w/2 && Math.abs(b.y - br.y) < br.h/2) {
-g.bricks.splice(i, 1);
-g.score += 10;
-sound('hit');
-return false;
-}
-}
-for (let bm of g.bombers) {
-if (Math.abs(b.x - bm.x) < 30 && Math.abs(b.y - bm.y) < 15) {
-bm.hp--;
-sound('hit');
-if (bm.hp <= 0) {
-g.score += 50;
-for (let i = 0; i < 8; i++) {
-const a = (6.28 * i) / 8;
-g.particles.push({
-x: bm.x, y: bm.y,
-vx: Math.cos(a) * 3, vy: Math.sin(a) * 3,
-life: 0.4, max: 0.4
-});
-}
-}
-return false;
-}
-}
-return true;
-});
-
-if (g.player.respawn <= 0) {
-g.eBullets = g.eBullets.filter(b => {
-if (Math.abs(b.x - g.player.x) < 15 && Math.abs(b.y - g.player.y) < 15) {
-g.player.lives--;
-g.player.respawn = 1;
-sound('damage');
-g.shake = 4;
-if (g.player.lives <= 0) setGameState('GAME_OVER');
-return false;
-}
-return true;
-});
-
-g.oBombs = g.oBombs.filter(b => {
-if (Math.abs(b.x - g.player.x) < 15 + b.s && Math.abs(b.y - g.player.y) < 15 + b.s) {
-g.player.health = Math.max(0, g.player.health - 25);
-sound('damage');
-g.shake = 5;
-if (g.player.health <= 0) {
-g.player.lives--;
-g.player.health = 100;
-g.player.respawn = 1;
-if (g.player.lives <= 0) setGameState('GAME_OVER');
-}
-return false;
-}
-return true;
-});
-}
-
-g.particles = g.particles.filter(p => {
-p.x += p.vx;
-p.y += p.vy;
-p.life -= dt;
-return p.life > 0;
-});
-
-if (g.octo.health <= 0) {
-sound('victory');
-setGameState('VICTORY');
-}
-
-// Render
-const sx = (Math.random() - 0.5) * g.shake;
-const sy = (Math.random() - 0.5) * g.shake;
-ctx.save();
-ctx.translate(sx, sy);
-
-ctx.fillStyle = '#000';
-ctx.fillRect(0, 0, 400, 700);
-
-ctx.fillStyle = '#fff';
-for (let i = 0; i < 50; i++) {
-const x = (i * 137.5) % 400;
-const y = ((i * 73.3) % 700 + g.t * 20) % 700;
-ctx.fillRect(x, y, (i % 3) + 1, (i % 3) + 1);
-}
-
-g.charge.zones.forEach(z => {
-ctx.strokeStyle = `rgba(255, 255, 100, ${0.2 * (z.t / 4)})`;
-ctx.lineWidth = 2;
-ctx.beginPath();
-ctx.arc(z.x, z.y, z.r, 0, 6.28);
-ctx.stroke();
-});
-
-ctx.fillStyle = '#ff00ff';
-ctx.shadowBlur = 15;
-ctx.shadowColor = '#ff00ff';
-const ts = g.octo.w / 9;
-for (let i = 0; i < 8; i++) {
-const off = Math.sin(g.t * 2.5 + i * 0.45) * 12;
-const x = g.octo.x - g.octo.w/2 + (i + 0.5) * ts;
-ctx.fillRect(x - 3, g.octo.y + 15, 6, Math.abs(off) + 10);
-}
-ctx.fillRect(g.octo.x - 40, g.octo.y - 15, 80, 30);
-ctx.fillStyle = '#fff';
-ctx.fillRect(g.octo.x - 25, g.octo.y - 8, 18, 8);
-ctx.fillRect(g.octo.x + 7, g.octo.y - 8, 18, 8);
-ctx.shadowBlur = 0;
-
-g.bricks.forEach(b => {
-ctx.fillStyle = '#ff8800';
-ctx.shadowBlur = 8;
-ctx.shadowColor = '#ff8800';
-ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
-ctx.fillStyle = '#fff';
-ctx.fillRect(b.x - 6, b.y - 3, 3, 3);
-ctx.fillRect(b.x + 3, b.y - 3, 3, 3);
-ctx.shadowBlur = 0;
-});
-
-g.bombers.forEach(b => {
-ctx.fillStyle = '#b8860b';
-ctx.shadowBlur = 8;
-ctx.shadowColor = '#b8860b';
-ctx.fillRect(b.x - 30, b.y - 12, 60, 24);
-ctx.fillStyle = '#654321';
-ctx.fillRect(b.x - 32, b.y - 10, 8, 20);
-ctx.fillRect(b.x + 24, b.y - 10, 8, 20);
-ctx.shadowBlur = 0;
-});
-
-if (g.player.respawn <= 0 || Math.floor(g.t * 10) % 2) {
-ctx.fillStyle = '#00bfff';
-ctx.strokeStyle = '#000';
-ctx.lineWidth = 2;
-if (g.charge.state === 'CHARGING') {
-ctx.shadowBlur = 15 * (g.charge.time / 2);
-ctx.shadowColor = '#ffff00';
-}
-ctx.beginPath();
-ctx.moveTo(g.player.x, g.player.y - 15);
-ctx.lineTo(g.player.x - 15, g.player.y);
-ctx.arc(g.player.x, g.player.y, 15, 3.14, 0);
-ctx.lineTo(g.player.x, g.player.y - 15);
-ctx.fill();
-ctx.stroke();
-ctx.fillStyle = '#ffff88';
-ctx.beginPath();
-ctx.arc(g.player.x, g.player.y, 8, 0, 6.28);
-ctx.fill();
-ctx.shadowBlur = 0;
-}
-
-ctx.shadowBlur = 10;
-g.pBullets.forEach(b => {
-ctx.fillStyle = '#ffff00';
-ctx.shadowColor = '#ffff00';
-ctx.fillRect(b.x - 2, b.y - 6, 4, 12);
-});
-g.eBullets.forEach(b => {
-ctx.fillStyle = b.t === 'brick' ? '#ff8800' : '#8b0000';
-ctx.shadowColor = b.t === 'brick' ? '#ff8800' : '#8b0000';
-ctx.fillRect(b.x - 2, b.y - 5, 4, 10);
-});
-g.oBombs.forEach(b => {
-ctx.fillStyle = '#ff00ff';
-ctx.shadowColor = '#ff00ff';
-ctx.beginPath();
-ctx.arc(b.x, b.y, b.s, 0, 6.28);
-ctx.fill();
-ctx.strokeStyle = '#ffaaff';
-ctx.lineWidth = 2;
-ctx.stroke();
-});
-ctx.shadowBlur = 0;
-
-if (g.charge.state === 'LAUNCHED') {
-ctx.fillStyle = '#ffffaa';
-ctx.shadowBlur = 20;
-ctx.shadowColor = '#ffff00';
-ctx.beginPath();
-ctx.arc(g.charge.x, g.charge.y, 10, 0, 6.28);
-ctx.fill();
-ctx.shadowBlur = 0;
-}
-
-g.particles.forEach(p => {
-ctx.fillStyle = `rgba(255, 255, 100, ${p.life / p.max})`;
-ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
-});
-
-ctx.fillStyle = '#0ff';
-ctx.font = '16px monospace';
-ctx.fillText(`SCORE: ${g.score}`, 10, 340);
-ctx.fillText(`LIVES: ${'❤'.repeat(g.player.lives)}`, 10, 370);
-ctx.fillStyle = '#444';
-ctx.fillRect(10, 380, 100, 10);
-ctx.fillStyle = g.player.health > 50 ? '#0f0' : g.player.health > 25 ? '#ff0' : '#f00';
-ctx.fillRect(10, 380, g.player.health, 10);
-
-ctx.fillStyle = '#444';
-ctx.fillRect(150, 10, 100, 8);
-ctx.fillStyle = '#f0f';
-ctx.fillRect(150, 10, g.octo.health, 8);
-
-const bs = 60;
-const bx = 10;
-const by = 630;
-if (g.charge.state === 'CHARGING') {
-ctx.fillStyle = `rgba(255, 255, 0, ${0.3 + 0.4 * (g.charge.time / 2)})`;
-ctx.shadowBlur = 20;
-ctx.shadowColor = '#ffff00';
-} else if (g.charge.cd > 0) {
-ctx.fillStyle = 'rgba(100, 100, 100, 0.3)';
-} else if (g.charge.state === 'LAUNCHED') {
-ctx.fillStyle = 'rgba(255, 200, 0, 0.5)';
-} else {
-ctx.fillStyle = 'rgba(50, 100, 150, 0.4)';
-}
-ctx.fillRect(bx, by, bs, bs);
-ctx.shadowBlur = 0;
-ctx.strokeStyle = '#0ff';
-ctx.lineWidth = 2;
-ctx.strokeRect(bx, by, bs, bs);
-ctx.fillStyle = '#fff';
-ctx.font = '11px monospace';
-ctx.fillText('CHARGE', bx + 6, by + 35);
-if (g.charge.cd > 0) {
-ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-ctx.font = '10px monospace';
-ctx.fillText(Math.ceil(g.charge.cd) + 's', bx + 20, by + 48);
-}
-
-if (g.showCtrl) {
-const a = g.ctrlT < 3.5 ? 0.8 : 0.8 - (g.ctrlT - 3.5) * 1.6;
-ctx.fillStyle = `rgba(0, 255, 255, ${a})`;
-ctx.font = '16px monospace';
-const txt = 'TAP TO MOVE • CHARGE TO BLAST';
-const tw = ctx.measureText(txt).width;
-ctx.fillText(txt, 200 - tw / 2, 550);
-}
-
-for (let y = 0; y < 700; y += 4) {
-ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
-ctx.fillRect(0, y, 400, 2);
-}
-
-ctx.restore();
-}, 1000/60);
-
-return () => clearInterval(loop);
-}, [gameState]);
-
-return (
-<div className="flex items-center justify-center min-h-screen bg-black">
-    <div className="relative">
-        <canvas ref={canvasRef} width={400} height={700} className="border-4 border-cyan-500 shadow-lg shadow-cyan-500/50" />
-        {gameState === 'MENU' && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-90">
-            <h1 className="text-6xl font-bold mb-8" style={{ fontFamily: 'monospace', color: '#ff00ff', textShadow: '0 0 20px #ff00ff' }}>
-            OCTO ALIEN
-            </h1>
-            <button onClick={startGame} className="px-8 py-4 bg-cyan-500 text-white font-bold text-xl rounded hover:bg-cyan-400 transition-all" style={{ fontFamily: 'monospace' }}>
-            START GAME
-            </button>
-            <div className="mt-8 text-cyan-300 text-sm text-center" style={{ fontFamily: 'monospace' }}>
+    <div id="menuScreen" class="overlay">
+        <h1 style="color: #ff00ff;">OCTO ALIEN</h1>
+        <p style="color: #0ff; margin-bottom: 2rem;">A retro arcade experience</p>
+        <button class="menu-btn" onclick="startGame()">START GAME</button>
+        <div class="controls">
             <p>Mobile: Tap to move, tap CHARGE button</p>
             <p>PC: Arrow keys / A-D, Space to charge</p>
         </div>
     </div>
-    )}
-    {gameState === 'VICTORY' && (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-90">
-        <h1 className="text-5xl font-bold mb-4" style={{ fontFamily: 'monospace', color: '#0ff', textShadow: '0 0 20px #0ff' }}>
-        VICTORY!
-        </h1>
-        <p className="text-2xl text-pink-400 mb-8" style={{ fontFamily: 'monospace' }}>
-        SCORE: {gameRef.current?.score || 0}
-        </p>
-        <button onClick={startGame} className="px-8 py-4 bg-green-500 text-white font-bold text-xl rounded hover:bg-green-400 transition-all" style={{ fontFamily: 'monospace' }}>
-        PLAY AGAIN
-        </button>
-    </div>
-    )}
-    {gameState === 'GAME_OVER' && (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-90">
-        <h1 className="text-5xl font-bold mb-4 text-red-500" style={{ fontFamily: 'monospace', textShadow: '0 0 20px #f00' }}>
-        GAME OVER
-        </h1>
-        <p className="text-2xl text-cyan-400 mb-8" style={{ fontFamily: 'monospace' }}>
-        SCORE: {gameRef.current?.score || 0}
-        </p>
-        <button onClick={startGame} className="px-8 py-4 bg-purple-500 text-white font-bold text-xl rounded hover:bg-purple-400 transition-all" style={{ fontFamily: 'monospace' }}>
-        TRY AGAIN
-        </button>
-    </div>
-    )}
-</div>
-</div>
-);
-};
 
-export default OctoAlien;
+    <div id="victoryScreen" class="overlay hidden">
+        <h1 style="color: #0ff;">VICTORY!</h1>
+        <p class="score" style="color: #f0f;">SCORE: <span id="victoryScore">0</span></p>
+        <button class="victory-btn" onclick="startGame()">PLAY AGAIN</button>
+    </div>
+
+    <div id="gameOverScreen" class="overlay hidden">
+        <h1 style="color: #f00;">GAME OVER</h1>
+        <p class="score" style="color: #0ff;">SCORE: <span id="gameOverScore">0</span></p>
+        <button class="gameover-btn" onclick="startGame()">TRY AGAIN</button>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    let audioCtx;
+    let gameState = 'MENU';
+    let game = {};
+    let keys = {};
+    let touchX = null;
+    let animationId;
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        }
+    }
+
+    function sound(type) {
+        if (!audioCtx) return;
+        const now = audioCtx.currentTime;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        switch(type) {
+            case 'shoot':
+                osc.frequency.setValueAtTime(440, now);
+                gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+                osc.start(now);
+                osc.stop(now + 0.08);
+                break;
+            case 'hit':
+                osc.frequency.setValueAtTime(330, now);
+                osc.frequency.exponentialRampToValueAtTime(220, now + 0.1);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(now);
+                osc.stop(now + 0.1);
+                break;
+            case 'damage':
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(110, now + 0.2);
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
+                osc.start(now);
+                osc.stop(now + 0.2);
+                break;
+            case 'detonate':
+                osc.frequency.setValueAtTime(80, now);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                osc.start(now);
+                osc.stop(now + 0.3);
+                break;
+            case 'phase':
+                [220, 277, 330].forEach(f => {
+                    const o = audioCtx.createOscillator();
+                    const g = audioCtx.createGain();
+                    o.connect(g);
+                    g.connect(audioCtx.destination);
+                    o.frequency.setValueAtTime(f, now);
+                    g.gain.setValueAtTime(0.1, now);
+                    g.gain.exponentialRampToValueAtTime(0.01, now + 0.4);
+                    o.start(now);
+                    o.stop(now + 0.4);
+                });
+                break;
+            case 'victory':
+                [220, 277, 330, 440, 550].forEach((f, i) => {
+                    const o = audioCtx.createOscillator();
+                    const g = audioCtx.createGain();
+                    o.connect(g);
+                    g.connect(audioCtx.destination);
+                    o.frequency.setValueAtTime(f, now + i * 0.1);
+                    g.gain.setValueAtTime(0.1, now + i * 0.1);
+                    g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.2);
+                    o.start(now + i * 0.1);
+                    o.stop(now + i * 0.1 + 0.2);
+                });
+                break;
+        }
+    }
+
+    function initGame() {
+        game = {
+            octo: { x: 200, y: 40, w: 80, health: 100, phase: 1, dir: 1, bombT: 0 },
+            player: { x: 200, y: 620, w: 30, health: 100, lives: 3, vx: 0, respawn: 0 },
+            bricks: [], bombers: [], pBullets: [], eBullets: [], oBombs: [],
+            charge: { state: 'IDLE', time: 0, x: 0, y: 0, cd: 0, zones: [] },
+            score: 0, t: 0, brickT: 0, bomberT: 0, shootT: 0, particles: [], shake: 0,
+            showCtrl: true, ctrlT: 0
+        };
+    }
+
+    function startGame() {
+        initAudio();
+        initGame();
+        gameState = 'PLAYING';
+        document.getElementById('menuScreen').classList.add('hidden');
+        document.getElementById('victoryScreen').classList.add('hidden');
+        document.getElementById('gameOverScreen').classList.add('hidden');
+        if (!animationId) gameLoop();
+    }
+
+    function showVictory() {
+        gameState = 'VICTORY';
+        document.getElementById('victoryScore').textContent = game.score;
+        document.getElementById('victoryScreen').classList.remove('hidden');
+    }
+
+    function showGameOver() {
+        gameState = 'GAME_OVER';
+        document.getElementById('gameOverScore').textContent = game.score;
+        document.getElementById('gameOverScreen').classList.remove('hidden');
+    }
+
+    window.addEventListener('keydown', e => {
+        keys[e.key] = true;
+        if (e.key === ' ') e.preventDefault();
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    canvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const x = e.touches[0].clientX - rect.left;
+        const y = e.touches[0].clientY - rect.top;
+        if (x < 80 && y > 630) {
+            if (game.charge.state === 'IDLE' && game.charge.cd <= 0) {
+                game.charge.state = 'CHARGING';
+                game.charge.time = 0;
+            } else if (game.charge.state === 'LAUNCHED') {
+                game.charge.state = 'DETONATING';
+            }
+        } else {
+            touchX = x;
+        }
+    });
+
+    canvas.addEventListener('touchmove', e => {
+        e.preventDefault();
+        const rect = canvas.getBoundingClientRect();
+        const x = e.touches[0].clientX - rect.left;
+        const y = e.touches[0].clientY - rect.top;
+        if (y < 600) touchX = x;
+    });
+
+    canvas.addEventListener('touchend', e => {
+        e.preventDefault();
+        touchX = null;
+        if (game.charge.state === 'CHARGING') {
+            game.charge.state = 'LAUNCHED';
+            game.charge.x = game.player.x;
+            game.charge.y = game.player.y;
+        }
+    });
+
+    function gameLoop() {
+        if (gameState !== 'PLAYING') {
+            animationId = null;
+            return;
+        }
+
+        const dt = 1/60;
+        game.t += dt;
+
+        if (game.showCtrl) {
+            game.ctrlT += dt;
+            if (game.ctrlT > 4) game.showCtrl = false;
+        }
+
+        if (game.shake > 0) game.shake *= 0.9;
+
+        // Player input
+        if (game.player.respawn <= 0) {
+            if (keys['ArrowLeft'] || keys['a'] || keys['A']) game.player.vx = -5;
+            else if (keys['ArrowRight'] || keys['d'] || keys['D']) game.player.vx = 5;
+            else if (touchX !== null) {
+                const diff = touchX - game.player.x;
+                game.player.vx = Math.sign(diff) * Math.min(Math.abs(diff) * 0.2, 5);
+            } else game.player.vx *= 0.8;
+
+            if (keys[' ']) {
+                if (game.charge.state === 'IDLE' && game.charge.cd <= 0) {
+                    game.charge.state = 'CHARGING';
+                    game.charge.time = 0;
+                    keys[' '] = false;
+                } else if (game.charge.state === 'LAUNCHED') {
+                    game.charge.state = 'DETONATING';
+                    keys[' '] = false;
+                }
+            }
+        }
+
+        // Update player
+        if (game.player.respawn > 0) {
+            game.player.respawn -= dt;
+        } else {
+            game.player.x += game.player.vx;
+            game.player.x = Math.max(15, Math.min(385, game.player.x));
+            game.shootT += dt;
+            if (game.shootT > 0.33) {
+                game.shootT = 0;
+                game.pBullets.push({ x: game.player.x, y: game.player.y - 15, vy: -8 });
+                sound('shoot');
+            }
+        }
+
+        // Update Octo
+        if (game.octo.health <= 49 && game.octo.phase === 1) {
+            game.octo.phase = 2;
+            sound('phase');
+            game.shake = 8;
+        }
+
+        if (game.octo.phase === 2) {
+            game.octo.x += game.octo.dir * 2;
+            if (game.octo.x < 50 || game.octo.x > 350) game.octo.dir *= -1;
+            game.octo.bombT += dt;
+            if (game.octo.bombT > 2.5) {
+                game.octo.bombT = 0;
+                game.oBombs.push({ x: game.octo.x, y: game.octo.y + 30, vy: 3, s: 12 });
+            }
+        }
+
+        // Spawn bricks
+        const spawnRate = game.octo.phase === 1 ? 1.2 : 0.65;
+        game.brickT += dt;
+        if (game.brickT > spawnRate && game.bricks.length < 60) {
+            game.brickT = 0;
+            const cols = 12;
+            const bw = 320 / cols;
+            for (let i = 0; i < 5; i++) {
+                const c = Math.floor(Math.random() * cols);
+                const r = Math.floor(Math.random() * 4);
+                const x = 40 + c * bw + bw/2;
+                const y = 100 + r * 25;
+                let blocked = false;
+                for (const z of game.charge.zones) {
+                    if (Math.hypot(x - z.x, y - z.y) < z.r) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                const exists = game.bricks.some(b => Math.abs(b.x - x) < 5 && Math.abs(b.y - y) < 5);
+                if (!exists && !blocked) {
+                    game.bricks.push({ x, y, w: bw - 4, h: 20, st: Math.random() * 1.5 });
+                    break;
+                }
+            }
+        }
+
+        // Update bricks
+        game.bricks.forEach(b => {
+            b.st += dt;
+            if (b.st > 1.2) {
+                b.st = 0;
+                game.eBullets.push({ x: b.x, y: b.y + 10, vy: 4, t: 'brick' });
+            }
+        });
+
+        // Spawn bombers
+        const bomberRate = game.octo.phase === 1 ? 13 : 9;
+        game.bomberT += dt;
+        if (game.bomberT > bomberRate) {
+            game.bomberT = 0;
+            const left = Math.random() < 0.5;
+            game.bombers.push({
+                x: left ? -40 : 440,
+                y: 280,
+                vx: left ? 3 : -3,
+                p: Math.random() * 6.28,
+                bt: 0.5,
+                hp: 3
+            });
+        }
+
+        // Update bombers
+        game.bombers.forEach(b => {
+            b.x += b.vx;
+            b.p += 0.05;
+            b.y = 280 + Math.sin(b.p) * 30;
+            b.bt += dt;
+            if (b.bt > 1.5 && b.x > 20 && b.x < 380) {
+                b.bt = 0;
+                game.eBullets.push({ x: b.x, y: b.y + 15, vy: 3.5, t: 'bomber' });
+            }
+        });
+
+        game.bombers = game.bombers.filter(b => b.x > -60 && b.x < 460 && b.hp > 0);
+
+        // Update bullets
+        game.pBullets.forEach(b => b.y += b.vy);
+        game.eBullets.forEach(b => b.y += b.vy);
+        game.oBombs.forEach(b => b.y += b.vy);
+        game.pBullets = game.pBullets.filter(b => b.y > -10);
+        game.eBullets = game.eBullets.filter(b => b.y < 710);
+        game.oBombs = game.oBombs.filter(b => b.y < 710);
+
+        // Charge bomb
+        if (game.charge.cd > 0) game.charge.cd -= dt;
+        if (game.charge.state === 'CHARGING') {
+            game.charge.time = Math.min(game.charge.time + dt, 2);
+        } else if (game.charge.state === 'LAUNCHED') {
+            game.charge.y -= 500 * dt;
+            if (game.charge.y < -20) game.charge.state = 'DETONATING';
+        } else if (game.charge.state === 'DETONATING') {
+            const r = 60 + (game.charge.time / 2) * 140;
+            game.charge.zones.push({ x: game.charge.x, y: game.charge.y, r, t: 4 });
+            sound('detonate');
+            game.shake = 6;
+            game.charge.state = 'IDLE';
+            game.charge.cd = 5;
+            for (let i = 0; i < 20; i++) {
+                const a = (6.28 * i) / 20;
+                game.particles.push({
+                    x: game.charge.x, y: game.charge.y,
+                    vx: Math.cos(a) * 5, vy: Math.sin(a) * 5,
+                    life: 0.5, max: 0.5
+                });
+            }
+        }
+
+        game.charge.zones = game.charge.zones.filter(z => {
+            z.t -= dt;
+            return z.t > 0;
+        });
+
+        // Collisions - player bullets
+        game.pBullets = game.pBullets.filter(b => {
+            if (Math.abs(b.x - game.octo.x) < 40 && Math.abs(b.y - game.octo.y) < 25) {
+                game.octo.health = Math.max(0, game.octo.health - 1);
+                game.score += 5;
+                sound('hit');
+                game.shake = 2;
+                return false;
+            }
+            for (let i = game.bricks.length - 1; i >= 0; i--) {
+                const br = game.bricks[i];
+                if (Math.abs(b.x - br.x) < br.w/2 && Math.abs(b.y - br.y) < br.h/2) {
+                    game.bricks.splice(i, 1);
+                    game.score += 10;
+                    sound('hit');
+                    return false;
+                }
+            }
+            for (let bm of game.bombers) {
+                if (Math.abs(b.x - bm.x) < 30 && Math.abs(b.y - bm.y) < 15) {
+                    bm.hp--;
+                    sound('hit');
+                    if (bm.hp <= 0) {
+                        game.score += 50;
+                        for (let i = 0; i < 8; i++) {
+                            const a = (6.28 * i) / 8;
+                            game.particles.push({
+                                x: bm.x, y: bm.y,
+                                vx: Math.cos(a) * 3, vy: Math.sin(a) * 3,
+                                life: 0.4, max: 0.4
+                            });
+                        }
+                    }
+                    return false;
+                }
+            }
+            return true;
+        });
+
+        // Collisions - enemy bullets
+        if (game.player.respawn <= 0) {
+            game.eBullets = game.eBullets.filter(b => {
+                if (Math.abs(b.x - game.player.x) < 15 && Math.abs(b.y - game.player.y) < 15) {
+                    game.player.lives--;
+                    game.player.respawn = 1;
+                    sound('damage');
+                    game.shake = 4;
+                    if (game.player.lives <= 0) showGameOver();
+                    return false;
+                }
+                return true;
+            });
+
+            game.oBombs = game.oBombs.filter(b => {
+                if (Math.abs(b.x - game.player.x) < 15 + b.s && Math.abs(b.y - game.player.y) < 15 + b.s) {
+                    game.player.health = Math.max(0, game.player.health - 25);
+                    sound('damage');
+                    game.shake = 5;
+                    if (game.player.health <= 0) {
+                        game.player.lives--;
+                        game.player.health = 100;
+                        game.player.respawn = 1;
+                        if (game.player.lives <= 0) showGameOver();
+                    }
+                    return false;
+                }
+                return true;
+            });
+        }
+
+        // Update particles
+        game.particles = game.particles.filter(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.life -= dt;
+            return p.life > 0;
+        });
+
+        // Check victory
+        if (game.octo.health <= 0) {
+            sound('victory');
+            showVictory();
+        }
+
+        render();
+        animationId = requestAnimationFrame(gameLoop);
+    }
+
+    function render() {
+        const sx = (Math.random() - 0.5) * game.shake;
+        const sy = (Math.random() - 0.5) * game.shake;
+        ctx.save();
+        ctx.translate(sx, sy);
+
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, 400, 700);
+
+        // Stars
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < 50; i++) {
+            const x = (i * 137.5) % 400;
+            const y = ((i * 73.3) % 700 + game.t * 20) % 700;
+            ctx.fillRect(x, y, (i % 3) + 1, (i % 3) + 1);
+        }
+
+        // Blast zones
+        game.charge.zones.forEach(z => {
+            ctx.strokeStyle = `rgba(255, 255, 100, ${0.2 * (z.t / 4)})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(z.x, z.y, z.r, 0, 6.28);
+            ctx.stroke();
+        });
+
+        // Octo
+        ctx.fillStyle = '#ff00ff';
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = '#ff00ff';
+        const ts = game.octo.w / 9;
+        for (let i = 0; i < 8; i++) {
+            const off = Math.sin(game.t * 2.5 + i * 0.45) * 12;
+            const x = game.octo.x - game.octo.w/2 + (i + 0.5) * ts;
+            ctx.fillRect(x - 3, game.octo.y + 15, 6, Math.abs(off) + 10);
+        }
+        ctx.fillRect(game.octo.x - 40, game.octo.y - 15, 80, 30);
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(game.octo.x - 25, game.octo.y - 8, 18, 8);
+        ctx.fillRect(game.octo.x + 7, game.octo.y - 8, 18, 8);
+        ctx.shadowBlur = 0;
+
+        // Bricks
+        game.bricks.forEach(b => {
+            ctx.fillStyle = '#ff8800';
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = '#ff8800';
+            ctx.fillRect(b.x - b.w/2, b.y - b.h/2, b.w, b.h);
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(b.x - 6, b.y - 3, 3, 3);
+            ctx.fillRect(b.x + 3, b.y - 3, 3, 3);
+            ctx.shadowBlur = 0;
+        });
+
+        // Bombers
+        game.bombers.forEach(b => {
+            ctx.fillStyle = '#b8860b';
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = '#b8860b';
+            ctx.fillRect(b.x - 30, b.y - 12, 60, 24);
+            ctx.fillStyle = '#654321';
+            ctx.fillRect(b.x - 32, b.y - 10, 8, 20);
+            ctx.fillRect(b.x + 24, b.y - 10, 8, 20);
+            ctx.shadowBlur = 0;
+        });
+
+        // Player
+        if (game.player.respawn <= 0 || Math.floor(game.t * 10) % 2) {
+            ctx.fillStyle = '#00bfff';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 2;
+            if (game.charge.state === 'CHARGING') {
+                ctx.shadowBlur = 15 * (game.charge.time / 2);
+                ctx.shadowColor = '#ffff00';
+            }
+            ctx.beginPath();
+            ctx.moveTo(game.player.x, game.player.y - 15);
+            ctx.lineTo(game.player.x - 15, game.player.y);
+            ctx.arc(game.player.x, game.player.y, 15, 3.14, 0);
+            ctx.lineTo(game.player.x, game.player.y - 15);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = '#ffff88';
+            ctx.beginPath();
+            ctx.arc(game.player.x, game.player.y, 8, 0, 6.28);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        // Bullets
+        ctx.shadowBlur = 10;
+        game.pBullets.forEach(b => {
+            ctx.fillStyle = '#ffff00';
+            ctx.shadowColor = '#ffff00';
+            ctx.fillRect(b.x - 2, b.y - 6, 4, 12);
+        });
+        game.eBullets.forEach(b => {
+            ctx.fillStyle = b.t === 'brick' ? '#ff8800' : '#8b0000';
+            ctx.shadowColor = b.t === 'brick' ? '#ff8800' : '#8b0000';
+            ctx.fillRect(b.x - 2, b.y - 5, 4, 10);
+        });
+        game.oBombs.forEach(b => {
+            ctx.fillStyle = '#ff00ff';
+            ctx.shadowColor = '#ff00ff';
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.s, 0, 6.28);
+            ctx.fill();
+            ctx.strokeStyle = '#ffaaff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+
+        // Charge bomb
+        if (game.charge.state === 'LAUNCHED') {
+            ctx.fillStyle = '#ffffaa';
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ffff00';
+            ctx.beginPath();
+            ctx.arc(game.charge.x, game.charge.y, 10, 0, 6.28);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        // Particles
+        game.particles.forEach(p => {
+            ctx.fillStyle = `rgba(255, 255, 100, ${p.life / p.max})`;
+            ctx.fillRect(p.x - 2, p.y - 2, 4, 4);
+        });
+
+        // UI
+        ctx.fillStyle = '#0ff';
+        ctx.font = '16px monospace';
+        ctx.fillText(`SCORE: ${game.score}`, 10, 340);
+        ctx.fillText(`LIVES: ${'❤'.repeat(game.player.lives)}`, 10, 370);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(10, 380, 100, 10);
+        ctx.fillStyle = game.player.health > 50 ? '#0f0' : game.player.health > 25 ? '#ff0' : '#f00';
+        ctx.fillRect(10, 380, game.player.health, 10);
+
+        // Octo health bar
+        ctx.fillStyle = '#444';
+        ctx.fillRect(150, 10, 100, 8);
+        ctx.fillStyle = '#f0f';
+        ctx.fillRect(150, 10, game.octo.health, 8);
+
+        // Charge button
+        const bs = 60;
+        const bx = 10;
+        const by = 630;
+        if (game.charge.state === 'CHARGING') {
+            ctx.fillStyle = `rgba(255, 255, 0, ${0.3 + 0.4 * (game.charge.time / 2)})`;
+            ctx.shadowBlur = 20;
+            ctx.shadowColor = '#ffff00';
+        } else if (game.charge.cd > 0) {
+            ctx.fillStyle = 'rgba(100, 100, 100, 0.3)';
+        } else if (game.charge.state === 'LAUNCHED') {
+            ctx.fillStyle = 'rgba(255, 200, 0, 0.5)';
+        } else {
+            ctx.fillStyle = 'rgba(50, 100, 150, 0.4)';
+        }
+        ctx.fillRect(bx, by, bs, bs);
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = '#0ff';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bx, by, bs, bs);
+        ctx.fillStyle = '#fff';
+        ctx.font = '11px monospace';
+        ctx.fillText('CHARGE', bx + 6, by + 35);
+        if (game.charge.cd > 0) {
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+            ctx.font = '10px monospace';
+            ctx.fillText(Math.ceil(game.charge.cd) + 's', bx + 20, by + 48);
+        }
+
+        // Controls overlay
+        if (game.showCtrl) {
+            const a = game.ctrlT < 3.5 ? 0.8 : 0.8 - (game.ctrlT - 3.5) * 1.6;
+            ctx.fillStyle = `rgba(0, 255, 255, ${a})`;
+            ctx.font = '16px monospace';
+            const txt = 'TAP TO MOVE • CHARGE TO BLAST';
+            const tw = ctx.measureText(txt).width;
+            ctx.fillText(txt, 200 - tw / 2, 550);
+        }
+
+        // Scanlines
+        for (let y = 0; y < 700; y += 4) {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.1)';
+            ctx.fillRect(0, y, 400, 2);
+        }
+
+        ctx.restore();
+    }
+</script>
+</body>
+</html>
